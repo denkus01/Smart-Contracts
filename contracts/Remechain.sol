@@ -1,8 +1,8 @@
-pragma solidity ^0.4.4;
+pragma solidity ^0.4.15;
 
 // ERC20 token interface is implemented only partially
 // (no SafeMath is used because contract code is very simple)
-// 
+//
 // Some functions left undefined:
 //  - transfer, transferFrom,
 //  - approve, allowance.
@@ -12,14 +12,13 @@ contract PresaleToken
     string public constant name = "Remechain Presale Token";
     string public constant symbol = "RMC";
     uint public constant decimals = 18;
-    uint public constant PRICE = 225;  // per 1 Ether
+    uint public constant PRICE = 320;  // per 1 Ether
 
     //  price
-    // Cap is 2667 ETH
-    // 1 eth = 0,00444 presale RMC tokens
-    // 1 RMC = 0,00444eth
+    // Cap is 1875 ETH
+    // 1 RMC = 0,0031eth
     // ETH price ~290$ - 18.08.2017
-    uint public constant TOKEN_SUPPLY_LIMIT = PRICE * 2667 * (1 ether / 1 wei);
+    uint public constant TOKEN_SUPPLY_LIMIT = PRICE * 1875 * (1 ether / 1 wei);
 
     enum State{
        Init,
@@ -44,10 +43,15 @@ contract PresaleToken
 
     mapping (address => uint256) private balance;
 
+struct Purchase {
+      address buyer;
+      uint amount;
+    }
+   Purchase[] purchases;
 /// Modifiers:
-    modifier onlyTokenManager()     { if(msg.sender != tokenManager) throw; _; }
-    modifier onlyCrowdsaleManager() { if(msg.sender != crowdsaleManager) throw; _; }
-    modifier onlyInState(State state){ if(state != currentState) throw; _; }
+    modifier onlyTokenManager()     { require(msg.sender == tokenManager); _;}
+    modifier onlyCrowdsaleManager() { require(msg.sender == crowdsaleManager); _;}
+    modifier onlyInState(State state){ require(state == currentState); _;}
 
 /// Events:
     event LogBuy(address indexed owner, uint value);
@@ -57,10 +61,10 @@ contract PresaleToken
 /// Functions:
     /// @dev Constructor
     /// @param _tokenManager Token manager address.
-    function PresaleToken(address _tokenManager, address _escrow) 
+    function PresaleToken(address _tokenManager, address _escrow)
     {
-        if(_tokenManager==0) throw;
-        if(_escrow==0) throw;
+        require(_tokenManager!=0);
+        require(_escrow!=0);
 
         tokenManager = _tokenManager;
         escrow = _escrow;
@@ -68,13 +72,15 @@ contract PresaleToken
 
     function buyTokens(address _buyer) public payable onlyInState(State.Running)
     {
-        if(msg.value == 0) throw;
+        require(msg.value != 0);
         uint newTokens = msg.value * PRICE;
-
-        if (totalSupply + newTokens > TOKEN_SUPPLY_LIMIT) throw;
+        require(!(totalSupply + newTokens < totalSupply));
+        require(!(totalSupply + newTokens > TOKEN_SUPPLY_LIMIT));
 
         balance[_buyer] += newTokens;
         totalSupply += newTokens;
+
+        purchases[purchases.length++] = Purchase({buyer: _buyer, amount: newTokens});
 
         LogBuy(_buyer, newTokens);
     }
@@ -84,7 +90,7 @@ contract PresaleToken
     function burnTokens(address _owner) public onlyCrowdsaleManager onlyInState(State.Migrating)
     {
         uint tokens = balance[_owner];
-        if(tokens == 0) throw;
+        require(tokens != 0);
 
         balance[_owner] = 0;
         totalSupply -= tokens;
@@ -92,7 +98,7 @@ contract PresaleToken
         LogBurn(_owner, tokens);
 
         // Automatically switch phase when migration is done.
-        if(totalSupply == 0) 
+        if(totalSupply == 0)
         {
             currentState = State.Migrated;
             LogStateSwitch(State.Migrated);
@@ -101,7 +107,7 @@ contract PresaleToken
 
     /// @dev Returns number of tokens owned by given address.
     /// @param _owner Address of token owner.
-    function balanceOf(address _owner) constant returns (uint256) 
+    function balanceOf(address _owner) constant returns (uint256)
     {
         return balance[_owner];
     }
@@ -126,7 +132,7 @@ contract PresaleToken
              || (currentState == State.Migrating && _nextState == State.Migrated
                  && totalSupply == 0);
 
-        if(!canSwitchState) throw;
+        require(canSwitchState);
 
         currentState = _nextState;
         LogStateSwitch(_nextState);
@@ -134,9 +140,9 @@ contract PresaleToken
 
     function withdrawEther() public onlyTokenManager
     {
-        if(this.balance > 0) 
+        if(this.balance > 0)
         {
-            if(!escrow.send(this.balance)) throw;
+            require(escrow.send(this.balance));
         }
     }
 
@@ -149,7 +155,7 @@ contract PresaleToken
     function setCrowdsaleManager(address _mgr) public onlyTokenManager
     {
         // You can't change crowdsale contract when migration is in progress.
-        if(currentState == State.Migrating) throw;
+        require(currentState != State.Migrating);
 
         crowdsaleManager = _mgr;
     }
@@ -178,9 +184,22 @@ contract PresaleToken
     {
         return totalSupply;
     }
+    function getNumberOfPurchases()constant returns(uint)
+    {
+        return purchases.length;
+    }
 
+    function getPurchaseAddress(uint index)constant returns(address)
+    {
+        return purchases[index].buyer;
+    }
+
+    function getPurchaseAmount(uint index)constant returns(uint)
+     {
+        return purchases[index].amount;
+    }
     // Default fallback function
-    function() payable 
+    function() payable
     {
         buyTokens(msg.sender);
     }
